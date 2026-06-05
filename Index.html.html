@@ -1,0 +1,469 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>לוח המשימות שלי ✦</title>
+  <meta name="description" content="אפליקציית ניהול משימות חכמה עם לוח שנה"/>
+
+  <!-- PWA -->
+  <meta name="mobile-web-app-capable" content="yes"/>
+  <meta name="apple-mobile-web-app-capable" content="yes"/>
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+  <meta name="apple-mobile-web-app-title" content="משימות"/>
+  <meta name="theme-color" content="#1d4ed8"/>
+  <link rel="manifest" href="manifest.json"/>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link href="https://fonts.googleapis.com/css2?family=Alef:wght@400;700&family=Frank+Ruhl+Libre:wght@300;400;700;900&display=swap" rel="stylesheet"/>
+
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <style>
+    * { box-sizing:border-box; margin:0; padding:0; -webkit-tap-highlight-color:transparent; }
+    html,body,#root { height:100%; }
+    body { background:#eff6ff; font-family:'Alef','Frank Ruhl Libre',serif; direction:rtl; overflow-x:hidden; }
+    input[type="date"]::-webkit-calendar-picker-indicator { filter:invert(40%) sepia(80%) saturate(400%) hue-rotate(190deg); }
+  </style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel">
+const { useState, useEffect, useCallback, useRef } = React;
+
+// ─── storage ─────────────────────────────────────────────────────────────
+const KEY = "todo_v3";
+const load  = () => { try { return JSON.parse(localStorage.getItem(KEY)) || []; } catch { return []; } };
+const save  = (t) => { try { localStorage.setItem(KEY, JSON.stringify(t)); } catch {} };
+
+// ─── constants ────────────────────────────────────────────────────────────
+const CATS = [
+  { id:"work",     label:"עבודה",  color:"#2563eb", icon:"💼" },
+  { id:"personal", label:"אישי",   color:"#3b82f6", icon:"🌟" },
+  { id:"urgent",   label:"דחוף",   color:"#1d4ed8", icon:"⚡" },
+  { id:"health",   label:"בריאות", color:"#60a5fa", icon:"🌿" },
+];
+const HE_DAYS   = ["ראשון","שני","שלישי","רביעי","חמישי","שישי","שבת"];
+const HE_MONTHS = ["ינואר","פברואר","מרץ","אפריל","מאי","יוני","יולי","אוגוסט","ספטמבר","אוקטובר","נובמבר","דצמבר"];
+const pad  = n => String(n).padStart(2,"0");
+const toDS = d => `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+const todayStr = () => toDS(new Date());
+
+// ─── print ────────────────────────────────────────────────────────────────
+function printWeek(tasks) {
+  const today = new Date(); today.setHours(0,0,0,0);
+  const sun = new Date(today); sun.setDate(today.getDate() - today.getDay());
+  const days = Array.from({length:7}, (_,i) => {
+    const d = new Date(sun); d.setDate(sun.getDate()+i);
+    return { date:d, str:toDS(d) };
+  });
+  const byDate = str => tasks.filter(t => t.dueDate===str);
+  const cat = id => CATS.find(c=>c.id===id);
+
+  const html = `<!DOCTYPE html><html dir="rtl" lang="he"><head><meta charset="UTF-8"/>
+  <title>לוח שבועי</title>
+  <link href="https://fonts.googleapis.com/css2?family=Alef:wght@400;700&display=swap" rel="stylesheet"/>
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:'Alef',sans-serif;direction:rtl;padding:28px;color:#1e3a8a;background:#fff}
+    h1{font-size:1.4rem;font-weight:900;margin-bottom:20px;color:#1d4ed8;border-bottom:2px solid #bfdbfe;padding-bottom:10px}
+    .day{margin-bottom:14px;border:1.5px solid #bfdbfe;border-radius:10px;padding:12px 16px;break-inside:avoid}
+    .dt{font-weight:700;font-size:.95rem;color:#1e40af;margin-bottom:8px;display:flex;align-items:center;gap:8px}
+    .badge{background:#3b82f6;color:#fff;font-size:.65rem;padding:2px 8px;border-radius:99px}
+    .empty{color:#94a3b8;font-size:.82rem}
+    .row{display:flex;align-items:center;gap:10px;padding:5px 0;border-bottom:1px solid #e0f2fe}
+    .row:last-child{border-bottom:none}
+    .dot{width:16px;height:16px;border-radius:50%;border:2px solid #93c5fd;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:.6rem;color:#fff}
+    .dot.d{background:#3b82f6;border-color:#3b82f6}
+    .txt{flex:1;font-size:.86rem}
+    .txt.d{text-decoration:line-through;color:#94a3b8}
+    .cbadge{font-size:.68rem;color:#60a5fa;background:#eff6ff;padding:2px 7px;border-radius:99px}
+    @media print{body{padding:16px}}
+  </style></head><body>
+  <h1>📅 לוח שבועי — ${HE_DAYS[days[0].date.getDay()]} ${days[0].date.getDate()}–${HE_DAYS[days[6].date.getDay()]} ${days[6].date.getDate()} ${HE_MONTHS[days[0].date.getMonth()]} ${days[0].date.getFullYear()}</h1>
+  ${days.map(({date,str})=>{
+    const ts = byDate(str);
+    return `<div class="day">
+      <div class="dt">${HE_DAYS[date.getDay()]} · ${date.getDate()} ${HE_MONTHS[date.getMonth()]}
+        ${str===todayStr()?'<span class="badge">היום</span>':''}
+      </div>
+      ${ts.length===0 ? '<div class="empty">אין משימות</div>'
+        : ts.map(t=>`<div class="row">
+            <div class="dot${t.done?' d':''}">${t.done?'✓':''}</div>
+            <span class="txt${t.done?' d':''}">${t.text}</span>
+            <span class="cbadge">${cat(t.category)?.icon||''} ${cat(t.category)?.label||''}</span>
+          </div>`).join('')}
+    </div>`;
+  }).join('')}
+  </body></html>`;
+
+  const w = window.open("","_blank");
+  if (!w) { alert("אנא אפשר חלונות קופצים ונסה שוב"); return; }
+  w.document.write(html);
+  w.document.close();
+  w.focus();
+  setTimeout(()=>w.print(), 600);
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+function App() {
+  const [tasks,    setTasksRaw] = useState(load);
+  const [tab,      setTab]      = useState("tasks");
+  const [input,    setInput]    = useState("");
+  const [dueDate,  setDueDate]  = useState(todayStr());
+  const [cat,      setCat]      = useState("personal");
+  const [filter,   setFilter]   = useState("all");
+  const [showDone, setShowDone] = useState(true);
+  const [calMonth, setCalMonth] = useState(new Date());
+  const [selDay,   setSelDay]   = useState(todayStr());
+  const [sparks,   setSparks]   = useState([]);
+  const [toast,    setToast]    = useState(null);
+  const inputRef = useRef(null);
+
+  const setTasks = useCallback(fn => {
+    setTasksRaw(prev => {
+      const next = typeof fn==="function" ? fn(prev) : fn;
+      save(next); return next;
+    });
+  }, []);
+
+  const showToast = (msg) => {
+    setToast(msg);
+    setTimeout(()=>setToast(null), 2200);
+  };
+
+  const addSparks = (x,y) => {
+    const s = Array.from({length:6},(_,i)=>({
+      id:Date.now()+i, x, y,
+      dx:(Math.random()-.5)*70, dy:(Math.random()-.5)*70
+    }));
+    setSparks(p=>[...p,...s]);
+    setTimeout(()=>setSparks(p=>p.filter(sp=>!s.find(ss=>ss.id===sp.id))),700);
+  };
+
+  const addTask = () => {
+    if (!input.trim()) { inputRef.current?.focus(); return; }
+    setTasks(p=>[{id:Date.now(),text:input.trim(),done:false,category:cat,dueDate,created:Date.now()},...p]);
+    setInput("");
+    showToast("✅ משימה נוספה!");
+    inputRef.current?.focus();
+  };
+
+  const toggle = (id, e) => {
+    if (e) { const r=e.currentTarget.getBoundingClientRect(); addSparks(r.left+12,r.top+12); }
+    setTasks(p=>p.map(t=>t.id===id?{...t,done:!t.done}:t));
+  };
+
+  const del = (id) => { setTasks(p=>p.filter(t=>t.id!==id)); showToast("🗑️ נמחקה"); };
+
+  // derived
+  const pending  = tasks.filter(t=>!t.done).length;
+  const doneCount= tasks.filter(t=>t.done).length;
+  const overdue  = tasks.filter(t=>!t.done&&t.dueDate&&t.dueDate<todayStr()).length;
+  const prog     = tasks.length ? Math.round(doneCount/tasks.length*100) : 0;
+
+  const filtered = tasks.filter(t => {
+    if (!showDone && t.done) return false;
+    if (filter==="today") return t.dueDate===todayStr();
+    if (filter!=="all") return t.category===filter;
+    return true;
+  });
+
+  // calendar
+  const cy = calMonth.getFullYear(), cm = calMonth.getMonth();
+  const firstDay = new Date(cy,cm,1).getDay();
+  const dim = new Date(cy,cm+1,0).getDate();
+  const cells = [...Array(firstDay).fill(null), ...Array.from({length:dim},(_,i)=>i+1)];
+  while(cells.length%7!==0) cells.push(null);
+  const byDate = str => tasks.filter(t=>t.dueDate===str);
+
+  // ── render ──
+  return (
+    <div style={{minHeight:"100vh",background:"#eff6ff",fontFamily:"'Alef',serif",direction:"rtl",paddingBottom:60}}>
+      <style>{`
+        .hero{background:linear-gradient(135deg,#1e3a8a 0%,#1d4ed8 55%,#3b82f6 100%);padding:36px 20px 64px;position:relative;overflow:hidden}
+        .hero::before{content:'';position:absolute;inset:0;background:radial-gradient(ellipse at 70% 50%,rgba(255,255,255,.09) 0%,transparent 70%)}
+        .blob{position:absolute;border-radius:50%;background:rgba(255,255,255,.06);pointer-events:none}
+        .htitle{font-family:'Frank Ruhl Libre',serif;font-size:2.5rem;font-weight:900;color:#fff;position:relative;line-height:1;letter-spacing:-1px;text-shadow:0 2px 20px rgba(0,0,0,.2)}
+        .hsub{color:rgba(255,255,255,.6);font-size:.8rem;margin-top:6px;position:relative;letter-spacing:.5px}
+        .prog-bg{background:rgba(255,255,255,.18);border-radius:99px;height:7px;overflow:hidden;margin-top:18px;position:relative}
+        .prog-fill{height:100%;background:linear-gradient(90deg,rgba(255,255,255,.6),#fff);border-radius:99px;transition:width .5s cubic-bezier(.4,0,.2,1)}
+        .prog-lbl{display:flex;justify-content:space-between;font-size:.68rem;color:rgba(255,255,255,.5);margin-top:4px;position:relative}
+
+        .stats{display:flex;gap:10px;padding:0 18px;margin-top:-32px;position:relative;z-index:10}
+        .sc{flex:1;background:#fff;border-radius:16px;padding:12px 8px;text-align:center;box-shadow:0 4px 20px rgba(30,58,138,.1);border:1px solid rgba(59,130,246,.1)}
+        .sn{font-family:'Frank Ruhl Libre',serif;font-size:1.7rem;font-weight:900;color:#1d4ed8;line-height:1}
+        .sl{font-size:.62rem;color:#94a3b8;margin-top:2px}
+        .sc.warn .sn{color:#ef4444}
+
+        .tabs{display:flex;gap:4px;padding:20px 18px 0}
+        .tb{flex:1;padding:10px;border:none;border-radius:12px;font-family:'Alef',serif;font-size:.84rem;cursor:pointer;transition:all .2s;font-weight:700}
+        .tb.on{background:#1d4ed8;color:#fff;box-shadow:0 4px 12px rgba(29,78,216,.28)}
+        .tb:not(.on){background:rgba(59,130,246,.08);color:#3b82f6}
+
+        .sec{margin:14px 18px 0;background:#fff;border-radius:20px;padding:18px;box-shadow:0 4px 20px rgba(30,58,138,.07);border:1px solid rgba(59,130,246,.08)}
+        .sec-title{font-size:.7rem;color:#94a3b8;font-weight:700;letter-spacing:.5px;margin-bottom:12px}
+
+        .inp{width:100%;background:#f0f7ff;border:1.5px solid #bfdbfe;border-radius:12px;padding:11px 14px;color:#1e3a8a;font-size:.9rem;font-family:'Alef',serif;direction:rtl;outline:none;transition:border-color .2s}
+        .inp:focus{border-color:#3b82f6;box-shadow:0 0 0 3px rgba(59,130,246,.12)}
+        .inp::placeholder{color:#93c5fd}
+        .flabel{font-size:.7rem;color:#94a3b8;margin-bottom:4px;font-weight:700;letter-spacing:.4px}
+        .grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px}
+        .span2{grid-column:1/-1}
+
+        .cpills{display:flex;gap:6px;flex-wrap:wrap}
+        .cp{border:1.5px solid transparent;border-radius:99px;padding:5px 12px;font-size:.74rem;cursor:pointer;font-family:'Alef',serif;transition:all .2s;background:rgba(59,130,246,.06);color:#60a5fa}
+        .cp.on{color:#fff;font-weight:700}
+
+        .add-btn{width:100%;padding:13px;background:linear-gradient(135deg,#1d4ed8,#3b82f6);border:none;border-radius:14px;color:#fff;font-size:.95rem;font-weight:700;font-family:'Alef',serif;cursor:pointer;box-shadow:0 4px 14px rgba(29,78,216,.28);transition:transform .15s,box-shadow .15s;letter-spacing:.3px;margin-top:12px}
+        .add-btn:hover{transform:translateY(-1px);box-shadow:0 6px 20px rgba(29,78,216,.38)}
+        .add-btn:active{transform:translateY(1px)}
+
+        .fbar{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:14px}
+        .fchip{border:1.5px solid #bfdbfe;border-radius:99px;padding:5px 12px;font-size:.73rem;cursor:pointer;font-family:'Alef',serif;background:#fff;color:#60a5fa;transition:all .2s}
+        .fchip.on{background:#1d4ed8;color:#fff;border-color:#1d4ed8}
+        .sdtog{margin-right:auto;font-size:.72rem;color:#94a3b8;cursor:pointer;display:flex;align-items:center;gap:5px;user-select:none}
+        .tog{width:30px;height:16px;background:#e0f2fe;border-radius:99px;position:relative;transition:background .2s}
+        .tog.on{background:#3b82f6}
+        .togk{position:absolute;top:2px;right:2px;width:12px;height:12px;border-radius:50%;background:#fff;transition:transform .2s;box-shadow:0 1px 3px rgba(0,0,0,.2)}
+        .tog.on .togk{transform:translateX(-14px)}
+
+        .ti{display:flex;align-items:flex-start;gap:11px;padding:12px 13px;border:1px solid #e0f2fe;border-radius:13px;margin-bottom:8px;background:#fafcff;transition:all .2s;animation:sli .28s ease}
+        .ti:hover{border-color:#93c5fd;box-shadow:0 2px 10px rgba(59,130,246,.07)}
+        @keyframes sli{from{opacity:0;transform:translateY(-8px)}to{opacity:1;transform:none}}
+        .chk{width:23px;height:23px;border-radius:50%;border:2px solid #93c5fd;background:#fff;cursor:pointer;flex-shrink:0;display:flex;align-items:center;justify-content:center;transition:all .2s;margin-top:1px}
+        .chk.on{background:linear-gradient(135deg,#3b82f6,#1d4ed8);border-color:transparent}
+        .tbody{flex:1}
+        .ttxt{color:#1e3a8a;font-size:.9rem;line-height:1.4}
+        .ttxt.done{text-decoration:line-through;color:#94a3b8}
+        .tmeta{display:flex;gap:7px;align-items:center;margin-top:4px;flex-wrap:wrap}
+        .tdate{font-size:.68rem;color:#60a5fa}
+        .tdate.od{color:#ef4444;font-weight:700}
+        .tbadge{font-size:.63rem;padding:2px 8px;border-radius:99px;font-weight:700;color:#fff}
+        .dbtn{background:none;border:none;color:#bfdbfe;cursor:pointer;font-size:.88rem;padding:4px;border-radius:6px;transition:color .2s;flex-shrink:0}
+        .dbtn:hover{color:#ef4444}
+
+        .empty{text-align:center;padding:36px 20px;color:#93c5fd}
+        .empty-icon{font-size:2.2rem;margin-bottom:8px}
+
+        /* calendar */
+        .cal-nav{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}
+        .cnbtn{background:#eff6ff;border:1.5px solid #bfdbfe;border-radius:10px;width:36px;height:36px;cursor:pointer;font-size:1.1rem;color:#3b82f6;display:flex;align-items:center;justify-content:center;transition:all .2s}
+        .cnbtn:hover{background:#dbeafe}
+        .cml{font-family:'Frank Ruhl Libre',serif;font-size:1.05rem;font-weight:700;color:#1e3a8a}
+        .cgrid{display:grid;grid-template-columns:repeat(7,1fr);gap:3px}
+        .ch{text-align:center;font-size:.6rem;font-weight:700;color:#93c5fd;padding:4px 0}
+        .cc{aspect-ratio:1;border-radius:9px;cursor:pointer;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;padding:4px 2px;font-size:.78rem;color:#1e3a8a;transition:all .15s;position:relative;border:1.5px solid transparent}
+        .cc:hover{background:#eff6ff;border-color:#bfdbfe}
+        .cc.today{background:#eff6ff;border-color:#3b82f6;color:#1d4ed8;font-weight:700}
+        .cc.sel{background:#1d4ed8;color:#fff!important}
+        .cc.ht::after{content:'';position:absolute;bottom:3px;width:5px;height:5px;border-radius:50%;background:#3b82f6}
+        .cc.sel.ht::after{background:#93c5fd}
+        .dd{margin-top:14px;padding-top:14px;border-top:1.5px dashed #bfdbfe}
+        .ddtitle{font-size:.83rem;font-weight:700;color:#1e3a8a;margin-bottom:10px}
+
+        .pbtn{width:100%;padding:13px;background:linear-gradient(135deg,#0f172a,#1e3a8a);border:none;border-radius:14px;color:#fff;font-size:.9rem;font-weight:700;font-family:'Alef',serif;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;margin-top:14px;letter-spacing:.3px;box-shadow:0 4px 14px rgba(15,23,42,.22);transition:transform .15s}
+        .pbtn:hover{transform:translateY(-1px)}
+
+        /* sparkle */
+        .spark{position:fixed;pointer-events:none;z-index:9999;font-size:.85rem;animation:spk .7s ease forwards}
+        @keyframes spk{0%{opacity:1;transform:translate(0,0) scale(1)}100%{opacity:0;transform:translate(var(--dx),var(--dy)) scale(.2)}}
+
+        /* toast */
+        .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#1d4ed8;color:#fff;padding:10px 22px;border-radius:99px;font-size:.85rem;font-weight:700;box-shadow:0 8px 24px rgba(29,78,216,.35);z-index:1000;animation:tin .3s ease,tout .3s 1.9s ease forwards}
+        @keyframes tin{from{opacity:0;transform:translateX(-50%) translateY(12px)}to{opacity:1;transform:translateX(-50%) translateY(0)}}
+        @keyframes tout{to{opacity:0;transform:translateX(-50%) translateY(12px)}}
+
+        /* scrollbar */
+        ::-webkit-scrollbar{width:4px}
+        ::-webkit-scrollbar-track{background:transparent}
+        ::-webkit-scrollbar-thumb{background:#bfdbfe;border-radius:99px}
+      `}</style>
+
+      {/* sparks */}
+      {sparks.map(s=>(
+        <div key={s.id} className="spark" style={{left:s.x,top:s.y,"--dx":s.dx+"px","--dy":s.dy+"px"}}>✦</div>
+      ))}
+
+      {/* toast */}
+      {toast && <div className="toast">{toast}</div>}
+
+      {/* ── Hero ── */}
+      <div className="hero">
+        <div className="blob" style={{width:180,height:180,top:-60,left:-40}}/>
+        <div className="blob" style={{width:110,height:110,bottom:-30,right:30}}/>
+        <div className="blob" style={{width:70,height:70,top:20,right:"38%"}}/>
+        <div className="htitle">✦ לוח המשימות</div>
+        <div className="hsub">ארגן · תעדוף · תצליח</div>
+        <div className="prog-bg">
+          <div className="prog-fill" style={{width:`${prog}%`}}/>
+        </div>
+        <div className="prog-lbl"><span>התקדמות</span><span>{prog}%</span></div>
+      </div>
+
+      {/* ── Stats ── */}
+      <div className="stats">
+        {[
+          {n:pending,   l:"ממתינות", w:false},
+          {n:doneCount, l:"הושלמו",  w:false},
+          {n:overdue,   l:"באיחור",  w:overdue>0},
+          {n:tasks.length,l:"סה״כ",  w:false},
+        ].map((s,i)=>(
+          <div key={i} className={`sc${s.w?" warn":""}`}>
+            <div className="sn">{s.n}</div>
+            <div className="sl">{s.l}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* ── Tabs ── */}
+      <div className="tabs">
+        <button className={`tb${tab==="tasks"?" on":""}`} onClick={()=>setTab("tasks")}>📋 משימות</button>
+        <button className={`tb${tab==="calendar"?" on":""}`} onClick={()=>setTab("calendar")}>📅 לוח שנה</button>
+      </div>
+
+      {/* ══ TASKS ══ */}
+      {tab==="tasks" && <>
+        <div className="sec">
+          <div className="sec-title">✦ הוספת משימה חדשה</div>
+          <div className="grid2">
+            <div className="span2">
+              <div className="flabel">תיאור המשימה</div>
+              <input ref={inputRef} className="inp" placeholder="מה צריך לעשות?"
+                value={input} onChange={e=>setInput(e.target.value)}
+                onKeyDown={e=>e.key==="Enter"&&addTask()}/>
+            </div>
+            <div>
+              <div className="flabel">📅 תאריך יעד</div>
+              <input className="inp" type="date" value={dueDate} onChange={e=>setDueDate(e.target.value)}/>
+            </div>
+            <div>
+              <div className="flabel">קטגוריה</div>
+              <div className="cpills">
+                {CATS.map(c=>(
+                  <button key={c.id} className={`cp${cat===c.id?" on":""}`}
+                    style={cat===c.id?{background:c.color,borderColor:c.color}:{borderColor:c.color+"50"}}
+                    onClick={()=>setCat(c.id)}>{c.icon} {c.label}</button>
+                ))}
+              </div>
+            </div>
+          </div>
+          <button className="add-btn" onClick={addTask}>+ הוסף משימה</button>
+        </div>
+
+        <div className="sec">
+          <div className="fbar">
+            {[{id:"all",label:"הכל"},{id:"today",label:"היום 📌"},...CATS].map(c=>(
+              <button key={c.id} className={`fchip${filter===c.id?" on":""}`}
+                onClick={()=>setFilter(c.id)}>{c.icon||""} {c.label}</button>
+            ))}
+            <label className="sdtog" onClick={()=>setShowDone(p=>!p)}>
+              הושלמו
+              <div className={`tog${showDone?" on":""}`}><div className="togk"/></div>
+            </label>
+          </div>
+
+          {filtered.length===0
+            ? <div className="empty"><div className="empty-icon">🌊</div><div>אין משימות כאן</div></div>
+            : filtered.map(t=>{
+                const c = CATS.find(x=>x.id===t.category);
+                const od = !t.done && t.dueDate && t.dueDate < todayStr();
+                const isToday = t.dueDate===todayStr();
+                return (
+                  <div key={t.id} className="ti">
+                    <button className={`chk${t.done?" on":""}`} onClick={e=>toggle(t.id,e)}>
+                      {t.done && <span style={{color:"#fff",fontSize:".72rem",fontWeight:"bold"}}>✓</span>}
+                    </button>
+                    <div className="tbody">
+                      <div className={`ttxt${t.done?" done":""}`}>{t.text}</div>
+                      <div className="tmeta">
+                        {t.dueDate && <span className={`tdate${od?" od":""}`}>{od?"⚠️ ":""}{isToday?"היום 📌":t.dueDate}</span>}
+                        <span className="tbadge" style={{background:c?.color}}>{c?.icon} {c?.label}</span>
+                      </div>
+                    </div>
+                    <button className="dbtn" onClick={()=>del(t.id)}>✕</button>
+                  </div>
+                );
+              })
+          }
+        </div>
+      </>}
+
+      {/* ══ CALENDAR ══ */}
+      {tab==="calendar" && <>
+        <div className="sec">
+          <div className="cal-nav">
+            <button className="cnbtn" onClick={()=>setCalMonth(p=>new Date(p.getFullYear(),p.getMonth()-1,1))}>‹</button>
+            <div className="cml">{HE_MONTHS[cm]} {cy}</div>
+            <button className="cnbtn" onClick={()=>setCalMonth(p=>new Date(p.getFullYear(),p.getMonth()+1,1))}>›</button>
+          </div>
+
+          <div className="cgrid" style={{marginBottom:4}}>
+            {HE_DAYS.map(d=><div key={d} className="ch">{d[0]}</div>)}
+          </div>
+          <div className="cgrid">
+            {cells.map((day,i)=>{
+              if (!day) return <div key={`e${i}`}/>;
+              const str = toDS(new Date(cy,cm,day));
+              const ht  = byDate(str).length>0;
+              const sel = str===selDay;
+              const tod = str===todayStr();
+              return (
+                <div key={str}
+                  className={`cc${tod?" today":""}${sel?" sel":""}${ht?" ht":""}`}
+                  onClick={()=>setSelDay(str)}>{day}</div>
+              );
+            })}
+          </div>
+
+          {/* day detail */}
+          {(()=>{
+            const d = new Date(selDay+"T12:00:00");
+            const ts = byDate(selDay);
+            return (
+              <div className="dd">
+                <div className="ddtitle">
+                  {HE_DAYS[d.getDay()]} · {d.getDate()} {HE_MONTHS[d.getMonth()]} {d.getFullYear()}
+                  {selDay===todayStr()&&<span style={{background:"#3b82f6",color:"#fff",fontSize:".63rem",padding:"2px 8px",borderRadius:99,marginRight:8}}>היום</span>}
+                  <span style={{color:"#93c5fd",fontSize:".73rem",marginRight:8}}>({ts.length} משימות)</span>
+                </div>
+                {ts.length===0
+                  ? <div style={{color:"#93c5fd",fontSize:".82rem",textAlign:"center",padding:"14px 0"}}>🌊 אין משימות ביום זה</div>
+                  : ts.map(t=>{
+                      const c=CATS.find(x=>x.id===t.category);
+                      return (
+                        <div key={t.id} className="ti">
+                          <button className={`chk${t.done?" on":""}`} onClick={e=>toggle(t.id,e)}>
+                            {t.done&&<span style={{color:"#fff",fontSize:".72rem",fontWeight:"bold"}}>✓</span>}
+                          </button>
+                          <div className="tbody">
+                            <div className={`ttxt${t.done?" done":""}`}>{t.text}</div>
+                            <div className="tmeta">
+                              <span className="tbadge" style={{background:c?.color}}>{c?.icon} {c?.label}</span>
+                            </div>
+                          </div>
+                          <button className="dbtn" onClick={()=>del(t.id)}>✕</button>
+                        </div>
+                      );
+                    })
+                }
+              </div>
+            );
+          })()}
+
+          <button className="pbtn" onClick={()=>printWeek(tasks)}>
+            🖨️ ייצוא השבוע להדפסה
+          </button>
+        </div>
+      </>}
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+</script>
+</body>
+</html>
